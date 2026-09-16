@@ -23,9 +23,14 @@
     AI Generated
 
 .VERSION
-    1.3.0
+    1.4.0
 
 .CHANGELOG
+    1.4.0 (2026-09-15)
+    - Clean console style: Write-Log now prints plain $Message with level color
+      (no [timestamp] [LEVEL] prefix); file keeps [timestamp] [LEVEL] for fleet
+      troubleshooting. Write-Banner title now includes live timestamp
+      "Solution | Mode | yyyy-MM-dd HH:mm:ss" to match operator-facing output.
     1.3.0 (2026-08-30)
     - Add canonical Write-Summary helper: colored status line + aligned
       per-target result table (Target/Result/Skipped/Error). Single source so
@@ -40,7 +45,7 @@
     1.0.0 - Initial release
 
 .LASTUPDATE
-    2026-08-30
+    2026-09-15
 
 .PARAMETER ExitCode
     Process exit code to terminate with (0=success/compliant, 1=failure/non-compliant, 2=script error).
@@ -117,7 +122,12 @@ function Write-Banner {
     [Alias('Show-Banner')]
     param()
 
-    $title      = '{0} | {1}' -f $SolutionName, $ScriptMode
+    # Clean enterprise banner: title includes live timestamp so file+console match
+    # the user-facing shape:
+    #   ==============================================================================
+    #   Solution | Mode | yyyy-MM-dd HH:mm:ss
+    #   ==============================================================================
+    $title      = '{0} | {1} | {2}' -f $SolutionName, $ScriptMode, (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
     $bannerLine = '=' * 78
     $lines      = @('', $bannerLine, $title, $bannerLine)
 
@@ -150,8 +160,10 @@ function Write-Log {
     # see Lesson 2026-08-30 | Find-IntunePolicyConflict | CLI logging / Mandatory parameter.
     if ([string]::IsNullOrEmpty($Message)) { return }
 
+    # Console = clean, no timestamp/level prefix - color alone conveys severity.
+    # File    = detailed - keeps [timestamp] [LEVEL] for fleet troubleshooting.
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $logLine = "[$timestamp] [$Level] $Message"
+    $fileLine  = "[$timestamp] [$Level] $Message"
 
     $color = switch ($Level) {
         "DEBUG"   { "DarkGray" }
@@ -160,10 +172,10 @@ function Write-Log {
         "WARNING" { "Yellow" }
         "ERROR"   { "Red" }
     }
-    Write-Host $logLine -ForegroundColor $color
+    Write-Host $Message -ForegroundColor $color
 
     if ($script:LogReady -and $script:LogFile) {
-        Add-Content -LiteralPath $script:LogFile -Value $logLine -Encoding UTF8 -ErrorAction SilentlyContinue -WhatIf:$false
+        Add-Content -LiteralPath $script:LogFile -Value $fileLine -Encoding UTF8 -ErrorAction SilentlyContinue -WhatIf:$false
     }
 }
 

@@ -96,3 +96,10 @@ Append an entry only when one of these actually happened (no speculation):
 - **Cause:** Critical identifiers live in reference files read early in the session; by the time the 1,400-line XAML was written, the model wrote styles/tokens/icons from memory instead of copying them verbatim. ICON LAW named only "Segoe Fluent Icons", so the model rationalized MDL2 as a different thing.
 - **Fix:** Added the Identity Lock section to SKILL.md (canonical names table + never-invent rule), banned ALL Segoe symbol fonts explicitly, added a pre-flight gate (re-open references immediately before writing), embedded the mandatory README badge/disclaimer skeleton, and shipped scripts/Test-ToolCompliance.ps1 which FAILs every drift pattern (validated: gold-standard tool passes, drifted tool reports 10 FAIL).
 - **Rule:** Canonical identifiers are copied from reference files verbatim at write time - never reconstructed from memory; every delivered tool must pass Test-ToolCompliance.ps1 with zero FAIL before handoff.
+
+## 2026-09-14 | All scripts | logging console style
+
+- **Mistake:** Embedded `Write-Log` functions in all scripts printed `[$timestamp] [$Level] $Message` to the console, making output noisy and hard to read during interactive troubleshooting.
+- **Cause:** The original canonical pattern reused the same formatted string for both console and log file, prioritizing fleet log richness over interactive UX.
+- **Fix:** Split the formatting: `$fileLine` keeps `[$timestamp] [$Level] $Message` for the log file; the console receives `$Message` only with color conveying severity. The banner title now includes a live timestamp.
+- **Rule:** Console output = clean message with color only; log file = timestamped and leveled. Never mix formats; never print structured prefixes to the console.

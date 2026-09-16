@@ -953,7 +953,8 @@ Prints a visual separator at script start so the log file and console output are
 $BannerLine = "=" * 78
 
 function Write-Banner {
-    $title = "{0} | {1}" -f $SolutionName, $ScriptMode
+    # Banner title includes live timestamp - canonical since Write-Log.ps1 v1.4.0
+    $title = "{0} | {1} | {2}" -f $SolutionName, $ScriptMode, (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
     $lines = @('', $BannerLine, $title, $BannerLine)
 
     foreach ($line in $lines) {
@@ -976,6 +977,7 @@ function Write-Banner {
 ### Finish-Script Helper
 
 A clean way to handle exit codes — logs the final message and exits in one call. This replaces scattered `Write-Log` + `exit` pairs throughout the script.
+Console output is clean (plain message + level color); file keeps `[timestamp] [LEVEL]` — see Canonical Logging.
 
 ```powershell
 function Finish-Script {

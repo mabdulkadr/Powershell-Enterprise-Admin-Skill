@@ -328,3 +328,64 @@ $script:Window = ConvertTo-XamlWindow -Xaml $xaml
 ```
 
 That's the only change. Everything else stays single-file.
+
+---
+
+## Output Placement - Reports Beside the Script (Law 12)
+
+> Moved here from `SKILL.md` (slim refactor): this file owns all path decisions.
+> `SKILL.md` keeps only the 4-line summary.
+
+Every script that produces output files (HTML, CSV, JSON, MD, ZIP) MUST place them in a folder beside the script:
+
+- **Reports** (HTML/CSV/JSON/MD): `<script-folder>\Reports\`
+- **Logs**: `<script-folder>\Logs\` **only** when the script actually emits logs outside of `Initialize-Log` (most CLI scripts log via the helper instead - WPF GUI scripts use `%LOCALAPPDATA%\<Tool>\Logs\`)
+
+The reason: dot-sourcing a script (`'. .\script.ps1'`) leaves `$PSScriptRoot=''` and `Join-Path '' 'Reports'` crashes with `ParameterBindingValidationException`. Anchoring beside the script guarantees the report lands where the operator expects it, regardless of the caller's working directory.
+
+### Don't Create `Logs\` Unless You Log
+
+If the script uses `Initialize-Log`, that helper creates its own folder (`%ProgramData%\<Tool>\Logs\` for the General type and `<SystemDrive>\IntuneLogs\<Tool>\` for the Intune type). Do **not** add an extra `Logs\` folder beside the script just for symmetry - let the logging helper own that decision. Only add a beside-script `Logs\` when the script writes plain-text log files outside of `Initialize-Log`.
+
+### Dual CSV + Fancy HTML for Reporting Scripts
+
+Every reporting/inventory script (any script whose `TAGS` contains `Reporting`, `Inventory`, `Compliance`, `Health`, `Audit`, or whose name starts with `Export-`/`Get-`) that writes a report **MUST export both** artifacts to `<script-folder>\Reports\`:
+
+- **CSV** - raw data: `Reports\<ScriptName>_yyyyMMdd_HHmmss.csv` via `Export-Csv -NoTypeInformation -Encoding UTF8`
+- **HTML** - fancy Carbon Dark dashboard: `Reports\<ScriptName>_yyyyMMdd_HHmmss.html` via the canonical `Export-StandardHtmlReport` helper (self-contained, no CDN, Carbon tokens `--cds-*`; see `references/html-reports.md`)
+
+Both files share the same timestamp so they pair in Explorer. The console's tailored display prints both paths:
+
+```text
+  -- Certificate Stores --
+  Store                   Count
+  Cert:\LocalMachine\My       7
+  CSV:  C:\...\Reports\CertificateSummary_20260831_092723.csv (112 bytes)
+  HTML: C:\...\Reports\CertificateSummary_20260831_092723.html (2055 bytes)
+```
+
+**Canonical dual-export pattern (inside `Invoke-TargetAction`, after collecting `$rows`):**
+
+```powershell
+$scriptBase = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $PSCommandPath }
+$reports = Join-Path $scriptBase "Reports"
+if (-not (Test-Path -LiteralPath $reports)) { $null = [System.IO.Directory]::CreateDirectory($reports) }
+$csvPath  = Join-Path $reports "$SolutionName`_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv"
+$htmlPath = $csvPath -replace '\.csv$', '.html'
+$rows | Export-Csv -Path $csvPath -NoTypeInformation -Encoding UTF8
+# Build $tableHtml from $rows, then:
+Export-StandardHtmlReport -HtmlPath $htmlPath -Title $SolutionName -Subtitle "Generated $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -TableHtml $tableHtml
+Write-Log -Message "CSV report: $csvPath" -Level 'INFO'
+Write-Log -Message "HTML report: $htmlPath" -Level 'INFO'
+```
+
+**Tailored display (after `Write-Summary`) must show both:**
+
+```powershell
+$csvDisp  = Get-ChildItem -Path $reports -Filter "*.csv"  -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$htmlDisp = Get-ChildItem -Path $reports -Filter "*.html" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if ($csvDisp)  { Write-Host "  CSV:  $($csvDisp.FullName) ($($csvDisp.Length) bytes)" -ForegroundColor Cyan }
+if ($htmlDisp) { Write-Host "  HTML: $($htmlDisp.FullName) ($($htmlDisp.Length) bytes)" -ForegroundColor Green }
+```
+
+`Test-ToolCompliance.ps1` flags a reporting script that writes only one format (`Export-Csv` without `Export-StandardHtmlReport`/`.html`, or vice versa) as `WARN: single-format report`.

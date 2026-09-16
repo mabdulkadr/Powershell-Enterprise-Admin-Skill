@@ -23,9 +23,13 @@
     AI Generated
 
 .VERSION
-    1.2.0
+    1.3.0
 
 .CHANGELOG
+    1.3.0 (2026-09-15)
+    - Clean console style: prints plain $Message with level color (no
+      [timestamp] [LEVEL] prefix on console); file keeps [timestamp] [LEVEL]
+      and RichTextBox keeps structured entry. Matches CLI Write-Log clean style.
     1.2.0 (2026-08-30)
     - AllowEmptyString on Add-LogLine -Message + early-return guard (Lesson
       2026-08-30 Find-IntunePolicyConflict). Mandatory + empty was a binding
@@ -35,7 +39,7 @@
     1.0.0 - Initial release
 
 .LASTUPDATE
-    2026-08-30
+    2026-09-15
 
 .PARAMETER Level
     Log level ('INFO', 'SUCCESS', 'WARNING', 'ERROR', 'DEBUG'). Default is 'INFO'.
@@ -86,13 +90,15 @@ function Add-LogLine {
     }
     $script:lastLogKey = $currentLogKey
 
+    # Console = clean (plain message + color) for operator readability.
+    # File + RichTextBox keep [timestamp] [LEVEL] for troubleshooting.
     $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-    $logLine = "[$timestamp] [$Level] $Message"
+    $fileLine  = "[$timestamp] [$Level] $Message"
 
     # File output
-    Add-Content -LiteralPath $script:LogFile -Value $logLine -Encoding UTF8 -ErrorAction SilentlyContinue -WhatIf:$false
+    Add-Content -LiteralPath $script:LogFile -Value $fileLine -Encoding UTF8 -ErrorAction SilentlyContinue -WhatIf:$false
 
-    # Console output — Tailwind Slate log palette
+    # Console output — Tailwind Slate log palette (clean)
     $color = switch ($Level) {
         'DEBUG'   { 'DarkGray' }
         'INFO'    { 'Cyan' }
@@ -100,7 +106,7 @@ function Add-LogLine {
         'WARNING' { 'Yellow' }
         'ERROR'   { 'Red' }
     }
-    Write-Host $logLine -ForegroundColor $color
+    Write-Host $Message -ForegroundColor $color
 
     # Live log-viewer bridge (Pattern E): notify subscriber with entry parts.
     if ($script:OnLogEntry) { & $script:OnLogEntry -Timestamp $timestamp -Level $Level -Message $Message }

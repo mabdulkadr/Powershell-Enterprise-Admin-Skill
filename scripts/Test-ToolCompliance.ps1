@@ -1,4 +1,4 @@
-<#
+﻿<#
 .TITLE
     Test-ToolCompliance
 
@@ -38,9 +38,12 @@
     AI Generated
 
 .VERSION
-    1.4.0
+    1.5.0
 
 .CHANGELOG
+    1.5.0 (2026-09-16)
+    - Log-folder exclusivity gate: FAIL any non-pair script referencing
+      IntuneLogs (Type 2 only); canonical Write-Log.ps1 exempt.
     1.4.0 (2026-09-01)
     - Header order gate: strictly verify canonical field sequence (HEADER LAW).
     - Law 4 zero-tolerance: FAIL on unguarded empty catch blocks.
@@ -59,7 +62,7 @@
     README contract, and Intune pair headers.
 
 .LASTUPDATE
-    2026-09-01
+    2026-09-16
 
 .EXAMPLE
     .\Test-ToolCompliance.ps1 -ToolPath C:\Pairs\detect-bitlocker.ps1, C:\Pairs\remediate-bitlocker.ps1
@@ -381,6 +384,16 @@ foreach ($toolFile in $ToolPath) {
                 Write-Check -Status 'FAIL' -Name 'Post-remediation verification' -Detail 'Remediation must verify the fix after applying it'
             }
         }
+    } else {
+        # Log-folder exclusivity: IntuneLogs is reserved for Type 2 Intune pairs.
+        # Type 1 GUI -> %LOCALAPPDATA%\<ToolName>\Logs\, Type 3 general CLI ->
+        # C:\ProgramData\<ToolName>\Logs\. The canonical helper Write-Log.ps1
+        # itself is exempt (it implements both branches by -Type).
+        if ($fileName -ne 'Write-Log.ps1' -and $content -match 'IntuneLogs') {
+            Write-Check -Status 'FAIL' -Name 'No IntuneLogs outside Intune pairs' -Detail 'IntuneLogs is Type 2 only - use %LOCALAPPDATA% (GUI) or C:\ProgramData (general CLI)'
+        } else {
+            Write-Check -Status 'PASS' -Name 'No IntuneLogs outside Intune pairs'
+        }
     }
 
     # ---------------------------------------------------------------
@@ -405,7 +418,7 @@ foreach ($toolFile in $ToolPath) {
 
     if ($content -match '(?m)^\s*\$SolutionName\s*=\s*[''"]([^''"]+)[''"]') {
         $solName = $Matches[1]
-        if ($solName -match '^[a-z]' -or $solName -match '\s' -or $solName -match '^[A-Z][a-z0-9]*-[a-z]') {
+        if ($solName -cmatch '^[a-z]' -or $solName -match '\s' -or $solName -cmatch '^[A-Z][a-z0-9]*-[a-z]') {
             Write-Check -Status 'FAIL' -Name 'SolutionName PascalCase casing' -Detail "SolutionName '$solName' is not PascalCase (must match folder identity without lowercase initials)"
         } else {
             Write-Check -Status 'PASS' -Name 'SolutionName PascalCase casing'
