@@ -36,9 +36,47 @@ Build production-grade PowerShell tools with modular architecture, Tailwind Slat
 
 ## Script Type Routing — Classify Before You Build
 
-Before writing any code, classify the user's request into one of three types. This determines which patterns, headers, and reference files to use.
+Before writing any code, classify the user's request on TWO independent axes below (v2 routing). v2 supersedes the legacy single-axis tree further down — use v2 for all new work.
 
-### Decision Tree
+### Smart Routing v2 — Two Axes (Output x Platform)
+
+Classify OUTPUT SHAPE first, then PLATFORM. The combination selects template, references, log path, and exit codes.
+
+**Axis 1 — Output shape (what the operator sees):**
+
+| Shape | ID | Signals (verbs / nouns) | Output contract |
+|-------|----|--------------------------|-----------------|
+| Interactive GUI tool | OUT-GUI | dashboard, tool, app, GUI, XAML, DataGrid, theme, helpdesk | WPF Tier 1/2/3, Tailwind Slate, Add-LogLine, Guard-Action. NEVER writes `Reports\` beside the script |
+| Read-only report | OUT-REPORT | Verbs `Get-`/`Export-`/`Test-` + nouns Inventory, Audit, Report, Compliance, Health, Status, Diagnostics. Read-only, returns a dataset | MUST dual-export `Reports\<Name>_yyyyMMdd_HHmmss.csv` (raw) + `.html` (Carbon Dark) with shared timestamp, plus print both paths. See Output Placement |
+| Fix / change action | OUT-ACTION | Verbs `Clear`/`Reset`/`Repair`/`Remove`/`Install`/`Uninstall`/`Restart`/`Enable`/`Disable`/`Invoke`/`Set`/`New`, or nouns fix, remediation, cleanup | Console-only (`Write-Log` + `Format-Table`). MUST NOT contain `Export-StandardHtmlReport`/`Export-ProfessionalHtmlReport` or `Reports\`. No HTML |
+
+Precedence: GUI beats REPORT (a dashboard that queries Graph is OUT-GUI, not a report). An Intune detect/remediate pair is always OUT-ACTION x PLAT-INTUNE (detection prints compliance + exit code, no HTML).
+
+**Axis 2 — Platform (where it runs / what it touches):**
+
+| Platform | ID | Signals | Auth / context | Log path |
+|----------|----|---------|----------------|----------|
+| Local Windows | PLAT-WIN | `HKLM`, CIM/WMI, `Cert:`, services, `netsh`, firewall, GPO, event logs, WinRM, CSV bulk | `Test-IsElevated`, degrade gracefully | `C:\ProgramData\<Tool>\Logs\` |
+| Intune remediation | PLAT-INTUNE | detection script, remediation script, proactive remediation, SYSTEM context, `detect-`/`remediate-` pair | SYSTEM, exit 0/1/2, `.REMEDIATIONTYPE` + `.PAIRSCRIPT` | `<SystemDrive>\IntuneLogs\<SolutionName>\` |
+| Microsoft 365 / Cloud | PLAT-M365 | Graph API, Entra ID, Exchange Online, SharePoint, Teams, Conditional Access, Managed Identity, runbook, notification mail | Interactive locally / Managed Identity in Automation / app-only unattended. `Get-MgGraphAllPages` + retry. Real scopes in `.PERMISSIONS`, never `HKLM`/CIM | Automation: LAW/console. Local run: `C:\ProgramData\<Tool>\Logs\` |
+| macOS | PLAT-MAC | bash, zsh, Sonoma/Sequoia | n/a | stdout |
+
+**Combine → build plan:**
+
+| Combination | Template | Extra references |
+|-------------|----------|------------------|
+| OUT-GUI x any | `templates/wpf-gui-tool.template.ps1` | patterns.md, xaml-styles.md, design-tokens.md (+ Connect-GraphAuth only if GUI calls Graph) |
+| OUT-REPORT x PLAT-WIN | `templates/cli-tool.template.ps1` + `templates/EnterpriseHtmlReport.template.ps1` | html-reports.md, cli-progress.md |
+| OUT-REPORT x PLAT-M365 | same report pair + `scripts/Connect-GraphAuth.ps1` + `scripts/Get-MgGraphAllPages.ps1` | _graph-canonical.md, notification-patterns.md (if scheduled) |
+| OUT-ACTION x PLAT-WIN | `templates/cli-tool.template.ps1`, NO report helper | domain ref (ad/winrm/event-log) |
+| OUT-ACTION x PLAT-INTUNE | `templates/intune-detect.template.ps1` + `templates/intune-remediate.template.ps1` | intune-patterns.md |
+| OUT-ACTION x PLAT-M365 | `templates/intune-notification.template.ps1` (runbook) or cli-tool + Graph, NO HTML unless it is a scheduled report | notification-patterns.md |
+
+Worked examples: "mailbox audit report" = OUT-REPORT x PLAT-M365. "Clear print queue" = OUT-ACTION x PLAT-WIN. "Detect stale BitLocker" = OUT-ACTION x PLAT-INTUNE. "Helpdesk dashboard for Entra users" = OUT-GUI x PLAT-M365. "Battery health HTML" = OUT-REPORT x PLAT-WIN. "Disable inactive AD computers" = OUT-ACTION x PLAT-WIN (console table only, no HTML even though it lists computers).
+
+**When ambiguous, ask the user** with the two axes (e.g. "Report with HTML, or console-only action? Windows local or M365 cloud?").
+
+### Decision Tree (legacy single-axis — kept for backward compat, v2 above wins)
 
 ```
 What is the user asking for?
@@ -111,6 +149,8 @@ These conventions are unified across every reference file. When a reference cont
 | **Graph auth** | Interactive (user context) | Per context — `scripts/Connect-GraphAuth.ps1` | Per context |
 
 **Why this table exists:** five reference files previously shipped different log paths and function names for the same concept. Operators troubleshooting a fleet found logs in three different locations depending on which file the model had read. One table, one convention, one place to look. **Log-folder exclusivity:** `IntuneLogs` is reserved for Type 2 Intune scripts ONLY — Type 1 uses `%LOCALAPPDATA%`, Type 3 uses `C:\ProgramData`. A non-Intune script referencing `IntuneLogs` fails the compliance gate.
+
+**v2 extensions (Smart Routing):** Type 2 splits by platform — PLAT-INTUNE (device pair, SYSTEM, `IntuneLogs`) vs PLAT-M365 (Graph/cloud, Managed Identity or interactive, NEVER `IntuneLogs`, NEVER `HKLM`/CIM). Output shape is orthogonal: OUT-REPORT (dual CSV+HTML in `Reports\`) vs OUT-ACTION (console-only, zero `Reports\`/HTML-helper references). An action script that lists objects (e.g. stale computers) stays OUT-ACTION — listing is not reporting.
 
 ---
 
@@ -362,7 +402,7 @@ if (-not (Test-Path -LiteralPath $OutputPath)) {
 
 If the script uses `Initialize-Log`, that helper creates its own folder (currently `%ProgramData%\<Tool>\Logs\` for the General type and `<SystemDrive>\IntuneLogs\<Tool>\` for the Intune type). Do **not** add an extra `Logs\` folder beside the script just for symmetry — let the logging helper own that decision. Only add a beside-script `Logs\` when the script writes plain-text log files outside of `Initialize-Log`.
 
-Reporting/inventory scripts (TAGS `Reporting`/`Inventory`/`Compliance`/`Health`/`Audit`, or `Export-*`/`Get-*` names) MUST export BOTH `Reports\<ScriptName>_yyyyMMdd_HHmmss.csv` (raw) and `.html` (Carbon dashboard, shared timestamp) plus print both paths in the tailored display. Full dual-export pattern, display snippet, and single-format WARN rule live in `references/file-architecture.md` (Output Placement).
+Reporting/inventory scripts (TAGS `Reporting`/`Inventory`/`Compliance`/`Health`/`Audit`, or `Export-*`/`Get-*` names) MUST export BOTH `Reports\<ScriptName>_yyyyMMdd_HHmmss.csv` (raw) and `.html` (Carbon dashboard, shared timestamp) plus print both paths in the tailored display. Action scripts (`Clear`/`Reset`/`Repair`/`Remove`/`Install`/`Invoke`/`Restart`/`Enable`/`Disable` and Intune pairs) MUST be console-only: zero `Reports\` references and zero HTML helpers — a `Format-Table` in the console is the deliverable. Full dual-export pattern, display snippet, and single-format WARN rule live in `references/file-architecture.md` (Output Placement).
 
 ---
 
@@ -377,6 +417,8 @@ Every deliverable starts from a copy-paste-ready scaffold in `templates/` — ne
 | Type 2 detection / remediation | `templates/intune-detect.template.ps1` / `templates/intune-remediate.template.ps1` |
 | Type 2 notification runbook | `templates/intune-notification.template.ps1` |
 | Type 3 general CLI tool | `templates/cli-tool.template.ps1` |
+| Type 3 report (OUT-REPORT x PLAT-WIN/M365) | `templates/cli-tool.template.ps1` + `templates/EnterpriseHtmlReport.template.ps1` (dual CSV+HTML) |
+| Type 3 action (OUT-ACTION) | `templates/cli-tool.template.ps1` WITHOUT any report helper |
 | Type 1 WPF GUI tool (Tier 1) | `templates/wpf-gui-tool.template.ps1` (all 19 styles included) |
 | macOS bash script | `templates/macos-script.template.sh` |
 | READMEs (4 variants) | `templates/readme-*.template.md` |
@@ -506,6 +548,7 @@ These 28 non-negotiable rules are extracted from `lessons-learned.md` because th
 26. **Try-scope data survival:** When HTML export consumes `$rows` from a prior try-block, always add defensive re-collection: `if (-not $rows) { $rows = <fresh-query> }`. Never trust cross-try variable survival.
 27. **Nested `$_` capture:** Before any nested `ForEach-Object` or `Where-Object` inside an outer `ForEach-Object`, capture `$rowRef = $_` and use `$rowRef.Property` inside the inner block.
 28. **Three-gate HTML verification:** After any HTML fix: (1) `[Parser]::ParseFile` = 0 errors, (2) script runs and produces HTML file, (3) count rows/cells/badges before vs after. Parser alone is not proof of data fidelity.
+29. **Smart-routing gate (v2):** Before writing, declare `OUT-GUI / OUT-REPORT / OUT-ACTION` x `PLAT-WIN / PLAT-INTUNE / PLAT-M365 / PLAT-MAC`. OUT-ACTION with an HTML helper or `Reports\` reference FAILS compliance. OUT-REPORT without dual CSV+HTML FAILS compliance. PLAT-M365 with `HKLM`/CIM/`IntuneLogs` FAILS compliance. PLAT-INTUNE without pair fields and 0/1/2 exits FAILS compliance.
 
 ---
 
